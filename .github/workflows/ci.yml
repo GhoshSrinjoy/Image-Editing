@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Build and test with the system compiler
+        if: runner.os != 'Windows'
+        run: |
+          make CFLAGS=-O2
+          make test
+          make wasm
+          node tests/wasm.test.mjs
+          ./build/imgedit --version
+
+      - name: Build and test with zig
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./build.ps1
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Build with MSVC
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          cl /nologo /std:c11 /O2 /W3 /D_CRT_SECURE_NO_WARNINGS src\parallel.c src\image.c src\png.c src\color.c src\geometry.c src\filter.c src\matte.c src\nn.c src\platform.c src\cli.c shell32.lib /Fobuild\ /Febuild\imgedit-msvc.exe
+          cl /nologo /std:c11 /O2 /W3 /D_CRT_SECURE_NO_WARNINGS src\parallel.c src\image.c src\png.c src\color.c src\geometry.c src\filter.c src\matte.c tests\test_core.c /Fobuild\ /Febuild\test_core-msvc.exe
+          build\test_core-msvc.exe

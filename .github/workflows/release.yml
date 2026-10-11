@@ -1,0 +1,75 @@
+name: release
+
+# Push a tag like v1.0.0 to publish ready-to-run archives (tool + ONNX Runtime).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  ORT: 1.31.0
+  ORT_DML: 1.24.4
+  DML: 1.15.4
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Build
+        run: |
+          set -e
+          SRC="src/parallel.c src/image.c src/png.c src/color.c src/geometry.c src/filter.c src/matte.c src/nn.c src/platform.c src/cli.c"
+          build() { mkdir -p "dist/$1"; zig cc -target "$2" -std=c11 -O3 -Wall -Wextra -Wno-unused-function $SRC $3 -o "dist/$1/$4"; }
+          build imgedit-windows-x64 x86_64-windows-gnu -lshell32 imgedit.exe
+          build imgedit-linux-x64 x86_64-linux-gnu.2.17 "-lm -ldl -lpthread" imgedit
+          build imgedit-linux-arm64 aarch64-linux-gnu.2.17 "-lm -ldl -lpthread" imgedit
+          build imgedit-macos-arm64 aarch64-macos -lm imgedit
+
+      - name: Add ONNX Runtime
+        run: |
+          set -e
+          get() { curl -fsSL "$1" -o "$2"; }
+          # Windows: DirectML build, GPU on any DirectX 12 card plus CPU fallback.
+          get "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/$ORT_DML" ort-dml.zip
+          get "https://www.nuget.org/api/v2/package/Microsoft.AI.DirectML/$DML" dml.zip
+          unzip -j -q ort-dml.zip runtimes/win-x64/native/onnxruntime.dll runtimes/win-x64/native/onnxruntime_providers_shared.dll -d dist/imgedit-windows-x64
+          unzip -j -q dml.zip bin/x64-win/DirectML.dll -d dist/imgedit-windows-x64
+          for p in linux-x64:x64 linux-arm64:aarch64; do
+            name=${p%%:*}; arch=${p##*:}
+            get "https://github.com/microsoft/onnxruntime/releases/download/v$ORT/onnxruntime-linux-$arch-$ORT.tgz" ort.tgz
+            tar xzf ort.tgz
+            cp -P onnxruntime-linux-$arch-$ORT/lib/libonnxruntime.so* dist/imgedit-$name/
+          done
+          get "https://github.com/microsoft/onnxruntime/releases/download/v$ORT/onnxruntime-osx-arm64-$ORT.tgz" ort.tgz
+          tar xzf ort.tgz
+          cp onnxruntime-osx-arm64-$ORT/lib/libonnxruntime.$ORT.dylib dist/imgedit-macos-arm64/libonnxruntime.dylib
+
+      - name: Package
+        run: |
+          set -e
+          cd dist
+          for d in imgedit-*; do
+            cp ../README.md ../LICENSE ../THIRD_PARTY_NOTICES.md "$d/"
+            case "$d" in
+              *windows*) zip -q -r "$d.zip" "$d" ;;
+              *) tar czf "$d.tar.gz" "$d" ;;
+            esac
+          done
+          ls -la
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          case "$tag" in v*) ;; *) tag="v$(grep -o 'IE_VERSION "[^"]*"' src/imgedit.h | cut -d'"' -f2)" ;; esac
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "imgedit $tag" --generate-notes
+          gh release upload "$tag" dist/*.zip dist/*.tar.gz --clobber
