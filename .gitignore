@@ -1,0 +1,10 @@
+build/
+.tools/
+dist/
+web/imgedit.wasm
+*.onnx
+*.part
+node_modules/
+*.pdb
+*.o
+*.obj
