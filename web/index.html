@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>imgedit — fast image editor</title>
+  <meta name="description" content="Remove backgrounds, invert, adjust, transform and convert images in your browser. Nothing is uploaded.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233b6cf6'/%3E%3Cpath d='M8 22l5-6 4 4 3-3 4 5z' fill='white'/%3E%3Ccircle cx='21' cy='11' r='3' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path d="M8 22l5-6 4 4 3-3 4 5z"/><circle cx="21" cy="11" r="3"/></svg>
+      <span>imgedit</span>
+    </div>
+    <nav class="actions">
+      <label class="btn primary" title="Open an image (Ctrl+O)">
+        <input id="file" type="file" accept="image/*,.qoi,.tga,.psd,.hdr,.ppm,.pgm,.pnm,.pam" hidden>Open
+      </label>
+      <button id="undo" class="btn" title="Undo (Ctrl+Z)" disabled>Undo</button>
+      <button id="redo" class="btn" title="Redo (Ctrl+Y)" disabled>Redo</button>
+      <button id="compare" class="btn" title="Hold to see the original (or hold C)" disabled>Compare</button>
+      <button id="reset" class="btn" title="Back to the original" disabled>Reset</button>
+      <button id="zoom" class="btn" title="Toggle fit / 100%" disabled>Fit</button>
+    </nav>
+    <a class="repo" href="https://github.com/GhoshSrinjoy/Image-Editing" target="_blank" rel="noopener">GitHub</a>
+  </header>
+
+  <main class="layout">
+    <section id="stage" class="stage" aria-label="Image">
+      <div id="drop" class="drop">
+        <div class="drop-inner">
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 6v24M14 20l10 10 10-10M8 36v6h32v-6" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <h1>Drop an image here</h1>
+          <p>or <label class="link"><input id="file2" type="file" accept="image/*,.qoi,.tga,.psd,.hdr,.ppm,.pgm,.pnm,.pam" hidden>choose a file</label>, or paste with Ctrl+V</p>
+          <p class="muted">Background removal, invert, adjustments, crop, resize and conversion — all on your device.</p>
+          <button id="sample" class="btn">Try a sample</button>
+        </div>
+      </div>
+      <div id="view" class="view" hidden>
+        <canvas id="canvas"></canvas>
+        <div id="crop" class="crop" hidden>
+          <div class="crop-box"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div>
+        </div>
+      </div>
+      <div id="busy" class="busy" hidden><div class="spinner"></div><span id="busy-text">Working…</span><div class="bar"><div id="busy-bar"></div></div></div>
+    </section>
+
+    <aside class="panel" aria-label="Tools">
+      <details open data-section="background">
+        <summary>Background</summary>
+        <div class="group">
+          <div class="seg" id="models" role="radiogroup" aria-label="Model"></div>
+          <p class="hint" id="model-hint"></p>
+          <button id="remove-bg" class="btn primary wide" disabled>Remove background</button>
+          <button id="key-bg" class="btn wide" disabled title="No download: removes a plain, evenly coloured background">Remove plain background</button>
+        </div>
+        <div class="group" id="cutout-opts" hidden>
+          <label class="row" id="tol-row" hidden><span>Tolerance</span><input id="tolerance" type="range" min="1" max="60" value="12"><output for="tolerance"></output></label>
+          <label class="row"><span>Shrink / grow</span><input id="grow" type="range" min="-15" max="15" value="0"><output for="grow"></output></label>
+          <label class="row"><span>Feather</span><input id="feather" type="range" min="0" max="20" step="0.5" value="0"><output for="feather"></output></label>
+          <label class="check"><input id="refine" type="checkbox" checked> Refine edges</label>
+          <label class="check"><input id="fix-edges" type="checkbox" checked> Clean edge colours</label>
+          <label class="check"><input id="keep-bg" type="checkbox"> Keep background, remove subject</label>
+          <div class="row"><span>New background</span>
+            <select id="bg-mode">
+              <option value="transparent">Transparent</option>
+              <option value="color">Colour</option>
+              <option value="blur">Blurred original</option>
+              <option value="image">Image…</option>
+            </select>
+          </div>
+          <label class="row" id="bg-color-row" hidden><span>Colour</span><input id="bg-color" type="color" value="#ffffff"></label>
+          <label class="row" id="bg-blur-row" hidden><span>Blur</span><input id="bg-blur" type="range" min="2" max="80" value="20"><output for="bg-blur"></output></label>
+          <input id="bg-file" type="file" accept="image/*" hidden>
+          <button id="mask-only" class="btn wide">Show mask only</button>
+        </div>
+      </details>
+
+      <details data-section="invert">
+        <summary>Invert</summary>
+        <div class="group buttons">
+          <button class="btn" data-invert="rgb" disabled>Colours</button>
+          <button class="btn" data-invert="lightness" disabled title="Light becomes dark, hues stay">Lightness</button>
+          <button class="btn" data-invert="alpha" disabled title="Swap transparent and opaque">Transparency</button>
+        </div>
+      </details>
+
+      <details data-section="adjust">
+        <summary>Adjust</summary>
+        <div class="group" id="adjust">
+          <label class="row"><span>Exposure</span><input data-adj="exposure" type="range" min="-3" max="3" step="0.05" value="0"><output></output></label>
+          <label class="row"><span>Brightness</span><input data-adj="brightness" type="range" min="-0.5" max="0.5" step="0.01" value="0"><output></output></label>
+          <label class="row"><span>Contrast</span><input data-adj="contrast" type="range" min="-0.9" max="0.9" step="0.01" value="0"><output></output></label>
+          <label class="row"><span>Saturation</span><input data-adj="saturation" type="range" min="-1" max="1" step="0.01" value="0"><output></output></label>
+          <label class="row"><span>Hue</span><input data-adj="hue" type="range" min="-180" max="180" step="1" value="0"><output></output></label>
+          <label class="row"><span>Temperature</span><input data-adj="temperature" type="range" min="-1" max="1" step="0.01" value="0"><output></output></label>
+          <label class="row"><span>Tint</span><input data-adj="tint" type="range" min="-1" max="1" step="0.01" value="0"><output></output></label>
+          <label class="row"><span>Gamma</span><input data-adj="gamma" type="range" min="0.2" max="3" step="0.01" value="1"><output></output></label>
+          <div class="buttons"><button id="adj-apply" class="btn primary" disabled>Apply</button><button id="adj-reset" class="btn">Reset</button></div>
+        </div>
+      </details>
+
+      <details data-section="filters">
+        <summary>Filters</summary>
+        <div class="group">
+          <div class="buttons">
+            <button class="btn" data-filter="auto-levels" disabled>Auto levels</button>
+            <button class="btn" data-filter="auto-color" disabled>Auto colour</button>
+            <button class="btn" data-filter="grayscale" disabled>Grayscale</button>
+            <button class="btn" data-filter="sepia" disabled>Sepia</button>
+          </div>
+          <label class="row"><span>Blur</span><input data-live="blur" type="range" min="0" max="30" step="0.5" value="0"><output></output></label>
+          <label class="row"><span>Sharpen</span><input data-live="sharpen" type="range" min="0" max="3" step="0.05" value="0"><output></output></label>
+          <label class="row"><span>Posterize</span><input data-live="posterize" type="range" min="0" max="16" step="1" value="0"><output></output></label>
+          <label class="row"><span>Threshold</span><input data-live="threshold" type="range" min="0" max="255" step="1" value="0"><output></output></label>
+          <div class="buttons"><button id="live-apply" class="btn primary" disabled>Apply</button><button id="live-reset" class="btn">Reset</button></div>
+        </div>
+      </details>
+
+      <details data-section="transform">
+        <summary>Transform</summary>
+        <div class="group">
+          <div class="buttons">
+            <button class="btn" data-tf="rotl" disabled title="Rotate left">⟲ 90°</button>
+            <button class="btn" data-tf="rotr" disabled title="Rotate right">⟳ 90°</button>
+            <button class="btn" data-tf="fliph" disabled>Flip ↔</button>
+            <button class="btn" data-tf="flipv" disabled>Flip ↕</button>
+          </div>
+          <label class="row"><span>Straighten</span><input data-live="rotate" type="range" min="-45" max="45" step="0.1" value="0"><output></output></label>
+          <div class="buttons"><button id="crop-start" class="btn" disabled>Crop…</button><button class="btn" data-tf="trim" disabled title="Cut away transparent or flat borders">Trim borders</button></div>
+          <div id="crop-bar" class="crop-bar" hidden>
+            <select id="crop-ratio">
+              <option value="0">Free</option><option value="1">1:1</option><option value="1.3333">4:3</option>
+              <option value="1.5">3:2</option><option value="1.7778">16:9</option><option value="0.75">3:4</option><option value="0.5625">9:16</option>
+            </select>
+            <button id="crop-apply" class="btn primary">Apply crop</button><button id="crop-cancel" class="btn">Cancel</button>
+          </div>
+          <div class="resize">
+            <input id="rw" type="number" min="1" aria-label="Width"><span>×</span><input id="rh" type="number" min="1" aria-label="Height">
+            <label class="check" title="Keep aspect ratio"><input id="rlock" type="checkbox" checked>🔗</label>
+            <button id="resize" class="btn" disabled>Resize</button>
+          </div>
+        </div>
+      </details>
+
+      <details open data-section="export">
+        <summary>Export</summary>
+        <div class="group">
+          <div class="row"><span>Format</span>
+            <select id="fmt">
+              <option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option>
+              <option value="avif">AVIF</option><option value="bmp">BMP</option><option value="tga">TGA</option>
+              <option value="qoi">QOI</option><option value="ppm">PPM</option>
+            </select>
+          </div>
+          <label class="row" id="q-row"><span>Quality</span><input id="quality" type="range" min="1" max="100" value="90"><output for="quality"></output></label>
+          <label class="row"><span>Scale</span>
+            <select id="scale"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option><option value="0.25">25%</option></select>
+          </label>
+          <label class="row"><span>Name</span><input id="name" type="text" value="image" spellcheck="false"></label>
+          <div class="buttons"><button id="download" class="btn primary" disabled>Download</button><button id="copy" class="btn" disabled>Copy</button></div>
+          <p class="hint" id="export-hint"></p>
+        </div>
+      </details>
+
+      <details data-section="batch">
+        <summary>Batch</summary>
+        <div class="group">
+          <p class="hint">Apply to many files at once and download a ZIP.</p>
+          <label class="check"><input id="b-remove" type="checkbox"> Remove background (selected model)</label>
+          <label class="check"><input id="b-trim" type="checkbox"> Trim borders</label>
+          <label class="row"><span>Max size</span><input id="b-max" type="number" min="0" placeholder="px, 0 = keep"></label>
+          <div class="row"><span>Format</span><select id="b-fmt"><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option><option value="qoi">QOI</option></select></div>
+          <label class="btn wide"><input id="b-files" type="file" accept="image/*" multiple hidden>Choose files…</label>
+          <p class="hint" id="b-status"></p>
+        </div>
+      </details>
+    </aside>
+  </main>
+
+  <footer class="status">
+    <span id="info">No image</span>
+    <span id="engine"></span>
+    <span class="muted">Runs locally — your images never leave this device.</span>
+  </footer>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
