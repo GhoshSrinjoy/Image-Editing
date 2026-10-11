@@ -6,7 +6,7 @@ Fast, light image editing in portable C: **background removal, inversion, adjust
 Nothing is uploaded: images are processed on your device.
 
 - **One small C core.** C11, no required dependencies; 0.7 MB native binary, 138 KB (gzipped) WebAssembly module.
-- **Background removal with modern models** (IS-Net, BiRefNet, U²-Net, MODNet) through ONNX Runtime, on the GPU when there is one (DirectML, CUDA, CoreML, WebGPU).
+- **Background removal with modern models** (BiRefNet, IS-Net, U²-Net, MODNet) through ONNX Runtime, on the GPU when there is one (DirectML, CUDA, CoreML, WebGPU). The sharpest model is the default whenever a GPU can run it.
 - **Edges that hold up.** The model's low-resolution mask is upsampled with a colour guided filter, so the edge follows the real photo, then edge colours are re-estimated (blur-fusion) so the old background doesn't leave a halo.
 - **No-model option** for plain backgrounds (studio shots, scans): colour key with border connectivity and speckle cleanup.
 - **Multithreaded throughout**, including a parallel PNG encoder.
@@ -19,8 +19,9 @@ Measured on an Intel Core i7-13700K, NVIDIA RTX 3090, Windows 11.
 | --- | --- | --- |
 | Remove background, 600×399 photo, same model (u2net, CPU) | 0.60 s | 0.61 s for the whole run (start, load model, cut out, save) |
 | Remove background, 24 MP photo, same model (u2net, CPU) | 9.2 s | **0.81 s** for the whole run |
-| Remove background, 36 MP portrait, default model (CPU) | – | 1.4 s for the whole run |
-| Best model (BiRefNet lite), per image in a batch | – | 0.27 s on GPU (DirectML), ~4 s on CPU |
+| Remove background, 36 MP portrait, IS-Net (CPU) | – | 1.4 s for the whole run |
+| Balanced model (BiRefNet 512), per image | – | ~1 s on CPU |
+| Best model (BiRefNet 1024), per image in a batch | – | 0.27 s on GPU (DirectML), ~4 s on CPU |
 
 The old-app column replays its default settings (u2net, alpha matting, 10 px erosion) and leaves out Python start-up. Besides being slower, its erosion cut into hair and edges. imgedit keeps them, and its edge-colour cleanup removes the halo.
 
@@ -30,14 +31,14 @@ Editing a 24 MP photo with the CLI: JPEG decode 88 ms · invert 3 ms · all colo
 
 Open an image (drop, paste or pick), then:
 
-- **Background:** remove it with a model (Fast, Balanced, Best, Portrait) or key out a plain background. Shrink/grow, feather or invert the mask, and replace the background with a colour, a blurred copy of the photo, or another image. All of these re-tune instantly without re-running the model.
+- **Background:** remove it with a model or key out a plain background. **Best** (BiRefNet at 1024 px, the default when WebGPU is available) keeps whole subjects and fine hair; **Balanced** (BiRefNet at 512 px) runs everywhere, including on the CPU; **Fast** and **Portrait** are lighter. If a model cannot run on a GPU, the page steps down to the CPU or to the next model by itself. Shrink/grow, feather or invert the mask, and replace the background with a colour, a blurred copy of the photo, or another image. All of these re-tune instantly without re-running the model.
 - **Invert:** colours, lightness only (light ↔ dark, hues kept), or transparency.
 - **Adjust:** exposure, brightness, contrast, saturation, hue, temperature, tint, gamma, with a live preview.
 - **Filters:** auto levels, auto colour, grayscale, sepia, blur, sharpen, posterize, threshold.
 - **Transform:** rotate, flip, straighten, crop (with aspect presets), resize, trim borders.
 - **Export:** PNG, JPEG, WebP, AVIF, BMP, TGA, QOI, PPM; copy to clipboard; batch-process many files into a ZIP.
 
-Undo/redo, hold **C** to compare with the original. Models download once from Hugging Face and are cached by the browser. WebGPU (current Chrome, Edge, Safari and Firefox on Windows) makes removal fast. Without it, Fast, Balanced and Portrait run on the CPU; Best needs WebGPU.
+**Revert any step:** every tool button has a ↶ half that reverts its last use, and the History panel lists every step with its own ↶; the steps after it are re-applied (a background removal after it re-runs on the new image). Undo/redo and hold **C** to compare with the original. Models download once from Hugging Face (pinned revisions, the Best model checked against its SHA-256) and are cached by the browser. WebGPU (current Chrome, Edge, Safari and Firefox on Windows) makes removal fast; without it, Fast, Balanced and Portrait run on the CPU and Best is unavailable.
 
 ## Command line
 
@@ -64,8 +65,9 @@ Models download on first use into `~/.u2net` (the folder rembg uses, so existing
 | `-m` | Model | Download | Notes | License |
 | --- | --- | --- | --- | --- |
 | `fast` | U²-Netp | 5 MB | very quick, softer edges | Apache-2.0 |
-| `balanced` (default) | IS-Net general | 179 MB | clean edges on most photos | Apache-2.0 |
-| `best` | BiRefNet lite | 224 MB | sharpest hair and detail; use a GPU | MIT |
+| `balanced` (default on CPU) | BiRefNet lite at 512 px | 192 MB | finds whole subjects, ~1 s on a CPU | MIT |
+| `best` (default with a GPU) | BiRefNet lite at 1024 px | 224 MB | sharpest hair and detail | MIT |
+| `isnet` | IS-Net general | 179 MB | quick on CPU | Apache-2.0 |
 | `max` | BiRefNet | 973 MB | highest quality, slow without a GPU | MIT |
 | `portrait` | MODNet | 26 MB | people, fine hair | Apache-2.0 |
 | `anime`, `human`, `u2net`, `silueta`, `birefnet-portrait` | | | see `imgedit models` | |

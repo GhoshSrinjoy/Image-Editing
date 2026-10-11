@@ -232,7 +232,8 @@ static void usage(FILE *f)
         "\n"
         "Background\n"
         "  -r, --remove-bg         cut out the subject with a neural model\n"
-        "  -m, --model NAME        fast, balanced (default), best, max, portrait, anime, ... or a .onnx file\n"
+        "  -m, --model NAME        fast, balanced, best, max, portrait, anime, ... or a .onnx file\n"
+        "                          (default: best with a GPU, balanced on CPU)\n"
         "      --key [COLOR]       remove a plain background by color (default: detected from the border)\n"
         "      --tolerance N       color distance for --key (default 10)\n"
         "      --softness N        edge softness for --key (default 8)\n"
@@ -643,7 +644,8 @@ static void list_models(const cli *c)
     char desc[1200], err[1200];
     if (ie_runtime_load(desc, sizeof desc, err, sizeof err) == IE_OK) printf("\nRuntime: %s\n", desc);
     else printf("\nRuntime: %s\n", err);
-    printf("Models download on first use (default: balanced).\n");
+    const char *gpu = ie_runtime_gpu();
+    printf("Models download on first use. Default here: %s.\n", gpu ? "best (GPU)" : "balanced (CPU)");
 }
 
 /* ---- per-file processing ---------------------------------------------- */
@@ -950,6 +952,8 @@ int main(int argc, char **argv)
 
     if (c.bg_mode == IE_BG_IMAGE && ie_load(c.bg_file, &c.bg_image) != IE_OK)
         die("cannot read background image %s", c.bg_file);
+    /* Default model: the sharpest one when a GPU can run it, else the CPU-friendly one. */
+    if (c.uses_model && !c.model) c.model = ie_runtime_gpu() ? "best" : "balanced";
     if (c.uses_model && !strcmp(c.device, "auto")) {
         /* A GPU session costs seconds to set up, which only pays off for heavy
          * models or for batches; small jobs finish sooner on the CPU. */

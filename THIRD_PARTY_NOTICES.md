@@ -18,6 +18,6 @@
   - BiRefNet: Peng Zheng et al., MIT
   - MODNet: Zhanghan Ke et al., Apache-2.0
 
-  ONNX files come from the rembg model releases and from these Hugging Face repositories: `BritishWerewolf/U-2-Netp`, `imgly/isnet-general-onnx`, `xrds/isnet-general-onnx-int8`, `onnx-community/BiRefNet_lite-ONNX`, `Xenova/modnet`.
+  ONNX files come from the rembg model releases and from these Hugging Face repositories: `BritishWerewolf/U-2-Netp`, `studioludens/birefnet-lite-512` (MIT), `jiabins0303/birefnet-lite-1024-webgpu` (MIT; BiRefNet-lite with its graph rewritten so it runs on WebGPU, weights unchanged), `Xenova/modnet`.
 
 The foreground colour estimation follows M. Forte and F. Pitié, "Approximate Fast Foreground Colour Estimation", ICIP 2021. The matte upsampling uses the guided filter of K. He, J. Sun and X. Tang (and its fast variant by K. He and J. Sun).

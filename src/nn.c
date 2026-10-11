@@ -26,11 +26,14 @@ typedef void *lib_t;
 static const ie_model_info MODELS[] = {
     {"u2netp", "fast", "u2netp.onnx", REMBG "u2netp.onnx", 320, IMAGENET_MEAN, IMAGENET_STD, 1 / 255.0f, 1, 5,
      "tiny general model, very fast, softer edges"},
-    {"isnet", "balanced", "isnet-general-use.onnx", REMBG "isnet-general-use.onnx", 1024, {0.5f, 0.5f, 0.5f},
-     {1, 1, 1}, 1 / 255.0f, 1, 179, "general objects and people, good speed/quality balance"},
+    {"birefnet-512", "balanced", "birefnet-lite-512.onnx",
+     "https://huggingface.co/studioludens/birefnet-lite-512/resolve/4a3c40c36c94093cc1e724d9ea428b8fa4b57dc7/onnx/model.onnx",
+     512, IMAGENET_MEAN, IMAGENET_STD, 1 / 255.0f, 1, 192, "BiRefNet at 512 px: finds whole subjects, about 1 s on a CPU"},
+    {"isnet", NULL, "isnet-general-use.onnx", REMBG "isnet-general-use.onnx", 1024, {0.5f, 0.5f, 0.5f}, {1, 1, 1},
+     1 / 255.0f, 1, 179, "IS-Net general, quick on CPU"},
     {"birefnet-lite", "best", "BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx",
      REMBG "BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx", 1024, IMAGENET_MEAN, IMAGENET_STD, 1 / 255.0f, 1, 224,
-     "sharpest edges and hair at a moderate cost"},
+     "BiRefNet at 1024 px: sharpest hair and detail (default with a GPU)"},
     {"birefnet", "max", "BiRefNet-general-epoch_244.onnx", REMBG "BiRefNet-general-epoch_244.onnx", 1024,
      IMAGENET_MEAN, IMAGENET_STD, 1 / 255.0f, 1, 973, "full-size BiRefNet, highest quality, slow without a GPU"},
     {"birefnet-portrait", NULL, "BiRefNet-portrait-epoch_150.onnx", REMBG "BiRefNet-portrait-epoch_150.onnx", 1024,
@@ -288,6 +291,20 @@ static const char *attach_device(OrtSessionOptions *so, const char *device)
     if ((any || ieq(device, "dml") || ieq(device, "directml")) && append_dml(so)) return "dml";
     if ((any || ieq(device, "coreml")) && append_coreml(so)) return "coreml";
     return "cpu";
+}
+
+const char *ie_runtime_gpu(void)
+{
+    if (ie_runtime_load(NULL, 0, NULL, 0) != IE_OK) return NULL;
+    OrtSessionOptions *so = NULL;
+    OrtStatus *st = ort->CreateSessionOptions(&so);
+    if (st) {
+        ort->ReleaseStatus(st);
+        return NULL;
+    }
+    const char *dev = attach_device(so, "gpu");
+    ort->ReleaseSessionOptions(so);
+    return strcmp(dev, "cpu") ? dev : NULL;
 }
 
 static OrtSession *create_session(const char *path, OrtSessionOptions *so, char *err, size_t errlen)

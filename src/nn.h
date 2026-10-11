@@ -35,6 +35,9 @@ int ie_model_open(ie_model **out, const char *path, const ie_model_info *info, c
                   char *err, size_t errlen);
 const char *ie_model_device(const ie_model *m);
 
+/* GPU provider the runtime can use here ("cuda", "dml", "coreml"), or NULL. */
+const char *ie_runtime_gpu(void);
+
 /* Predict the subject matte: a malloc'd mw x mh float image with values 0..1. */
 int ie_model_matte(ie_model *m, const ie_image *img, float **matte, int *mw, int *mh, char *err, size_t errlen);
 void ie_model_close(ie_model *m);
