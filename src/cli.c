@@ -516,46 +516,57 @@ static void parse_args(cli *c, int argc, char **argv)
 
 /* ---- models ------------------------------------------------------------ */
 
-static int model_dirs(const cli *c, char dirs[][1024], int max)
+#define PATHLEN 4096
+
+/* snprintf succeeded without truncation; over-long paths are skipped, not cut. */
+static int fits(int written, size_t size) { return written >= 0 && (size_t)written < size; }
+
+static int model_dirs(const cli *c, char dirs[][PATHLEN], int max)
 {
     int n = 0;
-    char buf[1024];
+    char buf[PATHLEN];
     const char *e;
-    if (c->model_dir && n < max) snprintf(dirs[n++], 1024, "%s", c->model_dir);
-    if ((e = pf_getenv("IMGEDIT_MODELS")) && n < max) snprintf(dirs[n++], 1024, "%s", e);
-    if (pf_exe_dir(buf, sizeof buf) == 0 && n < max) snprintf(dirs[n++], 1024, "%s%cmodels", buf, PF_SEP);
-    if ((e = pf_getenv("U2NET_HOME")) && n < max) snprintf(dirs[n++], 1024, "%s", e);
-    if (pf_home_dir(buf, sizeof buf) == 0 && n < max) snprintf(dirs[n++], 1024, "%s%c.u2net", buf, PF_SEP);
+#define ADD(...)                                                                  \
+    do {                                                                          \
+        if (n < max && fits(snprintf(dirs[n], PATHLEN, __VA_ARGS__), PATHLEN)) n++; \
+    } while (0)
+    if (c->model_dir) ADD("%s", c->model_dir);
+    if ((e = pf_getenv("IMGEDIT_MODELS"))) ADD("%s", e);
+    if (pf_exe_dir(buf, sizeof buf) == 0) ADD("%s%cmodels", buf, PF_SEP);
+    if ((e = pf_getenv("U2NET_HOME"))) ADD("%s", e);
+    if (pf_home_dir(buf, sizeof buf) == 0) ADD("%s%c.u2net", buf, PF_SEP);
+#undef ADD
     return n;
 }
 
 static int find_model_file(const cli *c, const ie_model_info *m, char *path, size_t n)
 {
-    char dirs[6][1024];
+    static char dirs[6][PATHLEN];
     int nd = model_dirs(c, dirs, 6);
-    for (int i = 0; i < nd; i++) {
-        snprintf(path, n, "%s%c%s", dirs[i], PF_SEP, m->file);
-        if (pf_exists(path)) return 1;
-    }
+    for (int i = 0; i < nd; i++)
+        if (fits(snprintf(path, n, "%s%c%s", dirs[i], PF_SEP, m->file), n) && pf_exists(path)) return 1;
     return 0;
 }
 
 static int download_model(const cli *c, const ie_model_info *m, char *path, size_t n)
 {
-    char dir[1024], home[1024];
+    char dir[PATHLEN], home[PATHLEN], tmp[PATHLEN + 8];
     const char *e;
-    if (c->model_dir) snprintf(dir, sizeof dir, "%s", c->model_dir);
-    else if ((e = pf_getenv("IMGEDIT_MODELS"))) snprintf(dir, sizeof dir, "%s", e);
-    else if ((e = pf_getenv("U2NET_HOME"))) snprintf(dir, sizeof dir, "%s", e);
-    else if (pf_home_dir(home, sizeof home) == 0) snprintf(dir, sizeof dir, "%s%c.u2net", home, PF_SEP);
+    int ok;
+    if (c->model_dir) ok = fits(snprintf(dir, sizeof dir, "%s", c->model_dir), sizeof dir);
+    else if ((e = pf_getenv("IMGEDIT_MODELS"))) ok = fits(snprintf(dir, sizeof dir, "%s", e), sizeof dir);
+    else if ((e = pf_getenv("U2NET_HOME"))) ok = fits(snprintf(dir, sizeof dir, "%s", e), sizeof dir);
+    else if (pf_home_dir(home, sizeof home) == 0) ok = fits(snprintf(dir, sizeof dir, "%s%c.u2net", home, PF_SEP), sizeof dir);
     else return 0;
+    if (!ok || !fits(snprintf(path, n, "%s%c%s", dir, PF_SEP, m->file), n) ||
+        !fits(snprintf(tmp, sizeof tmp, "%s.part", path), sizeof tmp)) {
+        fprintf(stderr, "imgedit: model folder path is too long\n");
+        return 0;
+    }
     if (pf_mkdirs(dir) != 0) {
         fprintf(stderr, "imgedit: cannot create %s\n", dir);
         return 0;
     }
-    char tmp[1100];
-    snprintf(path, n, "%s%c%s", dir, PF_SEP, m->file);
-    snprintf(tmp, sizeof tmp, "%s.part", path);
     fprintf(stderr, "Downloading model '%s' (%d MB) to %s\n", m->name, m->mb, dir);
     const char *argv[] = {"curl", "-fL", "--retry", "2", "-#", "-o", tmp, m->url, NULL};
     int code = pf_run(argv);
@@ -575,12 +586,12 @@ static int download_model(const cli *c, const ie_model_info *m, char *path, size
 static int ensure_model(cli *c)
 {
     if (c->nn) return 1;
-    char path[1200], err[1024] = "";
+    char path[PATHLEN + 64], err[1024] = "";
     static ie_model_info custom;
     const char *name = c->model ? c->model : "balanced";
     size_t len = strlen(name);
     if (len > 5 && pf_exists(name) && !pf_is_dir(name)) {
-        snprintf(path, sizeof path, "%s", name);
+        if (!fits(snprintf(path, sizeof path, "%s", name), sizeof path)) die("model path too long: %s", name);
         const ie_model_info *known = ie_model_for_file(name);
         if (known) {
             custom = *known;
@@ -624,7 +635,7 @@ static void list_models(const cli *c)
     const ie_model_info *m = ie_models(&n);
     printf("%-18s %-9s %7s  %-10s %s\n", "MODEL", "ALIAS", "SIZE", "STATUS", "NOTES");
     for (int i = 0; i < n; i++) {
-        char path[1200];
+        char path[PATHLEN + 64];
         int have = find_model_file(c, &m[i], path, sizeof path);
         printf("%-18s %-9s %4d MB  %-10s %s\n", m[i].name, m[i].alias ? m[i].alias : "", m[i].mb,
                have ? "ready" : "download", m[i].about);
