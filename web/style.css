@@ -231,6 +231,21 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .check input { accent-color: var(--accent); }
 .hint { margin: 0; color: var(--muted); font-size: 12px; }
 
+/* Tool buttons with a small revert (↶) half on the right. */
+.tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.split { display: flex; min-width: 0; }
+.split > .btn:first-child { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split > .btn.rev { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.btn.rev { flex: 0 0 auto; min-width: 34px; padding: 5px 8px; font-size: 15px; line-height: 1; }
+.buttons .btn.rev { flex: 0 0 auto; }
+
+.history { list-style: none; margin: 0; padding: 0; max-height: 210px; overflow-y: auto; }
+.history li { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 2px 0; border-bottom: 1px solid var(--line); }
+.history li:last-child { border-bottom: 0; }
+.history li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history li:first-child span { color: var(--muted); }
+.history li:last-child span { font-weight: 600; }
+
 .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 3px; background: var(--surface-2); border-radius: var(--radius); }
 .seg button {
   padding: 6px 4px;
@@ -247,8 +262,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .crop-bar select { flex: 1; min-height: 32px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
 
 .resize { display: flex; align-items: center; gap: 6px; }
-.resize input[type="number"] { width: 76px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
-.resize .btn { margin-left: auto; }
+.resize input[type="number"] { flex: 1; min-width: 0; width: 70px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.resize .check { white-space: nowrap; color: var(--muted); }
 
 .status {
   display: flex;

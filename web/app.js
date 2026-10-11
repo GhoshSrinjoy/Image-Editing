@@ -8,32 +8,39 @@ const ORT_DIR = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dis
 const HF = 'https://huggingface.co/';
 const IMAGENET = { mean: [0.485, 0.456, 0.406], std: [0.229, 0.224, 0.225], scale: 1 / 255 };
 
+// Model files, pinned to exact repository revisions.
+const hf = (repo, rev, file) => `${HF}${repo}/resolve/${rev}/${file}`;
+const U2NETP = (f) => hf('BritishWerewolf/U-2-Netp', '7112208dbac3a3642496c8d54e2f0f9bb3dc1dc8', f);
+const BIREFNET_512 = (f) => hf('studioludens/birefnet-lite-512', '4a3c40c36c94093cc1e724d9ea428b8fa4b57dc7', f);
+// BiRefNet-lite 1024 with its graph rewritten to run on WebGPU (same weights).
+const BIREFNET_1024 = (f) => hf('jiabins0303/birefnet-lite-1024-webgpu', '1ad01cef0f4101a285c5a3e0bd7f15597d93403f', f);
+const MODNET = (f) => hf('Xenova/modnet', 'fa2fa546052fba4c08921230a26cc69a333fca12', f);
+
 // gpu: WebGPU variant (f16 models need the shader-f16 feature, else gpuF32);
-// cpu: WebAssembly variant. Sizes in MB.
+// cpu: WebAssembly variant; fallback: model to use if this one cannot run here.
 const MODELS = {
   fast: {
-    label: 'Fast', about: 'U²-Netp, tiny and quick', size: 320, ...IMAGENET, minmax: true,
-    gpu: { url: HF + 'BritishWerewolf/U-2-Netp/resolve/main/onnx/model.onnx', mb: 4.6 },
-    cpu: { url: HF + 'BritishWerewolf/U-2-Netp/resolve/main/onnx/model.onnx', mb: 4.6 },
+    label: 'Fast', about: 'U²-Netp: tiny and quick, softer edges', size: 320, ...IMAGENET, minmax: true,
+    gpu: { url: U2NETP('onnx/model.onnx'), mb: 4.6 },
+    cpu: { url: U2NETP('onnx/model.onnx'), mb: 4.6 },
   },
   balanced: {
-    label: 'Balanced', about: 'IS-Net, clean edges for most photos', size: 1024,
-    mean: [128, 128, 128], std: [256, 256, 256], scale: 1, minmax: true,
-    gpu: { url: HF + 'imgly/isnet-general-onnx/resolve/main/onnx/model_fp16.onnx', mb: 88, f16: true },
-    gpuF32: { url: HF + 'imgly/isnet-general-onnx/resolve/main/onnx/model.onnx', mb: 176 },
-    cpu: { url: HF + 'xrds/isnet-general-onnx-int8/resolve/main/onnx/model_quantized.onnx', mb: 44 },
+    label: 'Balanced', about: 'BiRefNet at 512 px: finds the whole subject, runs everywhere', size: 512, ...IMAGENET, minmax: true,
+    gpu: { url: BIREFNET_512('onnx/model_fp16.onnx'), mb: 99, f16: true },
+    gpuF32: { url: BIREFNET_512('onnx/model.onnx'), mb: 192 },
+    cpu: { url: BIREFNET_512('onnx/model.onnx'), mb: 192 },
   },
   best: {
-    label: 'Best', about: 'BiRefNet lite, sharpest hair and detail (needs WebGPU)', size: 1024, ...IMAGENET, minmax: true,
-    gpu: { url: HF + 'onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model_fp16.onnx', mb: 115, f16: true },
-    gpuF32: { url: HF + 'onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model.onnx', mb: 224 },
+    label: 'Best', about: 'BiRefNet at 1024 px: sharpest hair and fine detail (WebGPU)', size: 1024, ...IMAGENET, minmax: true,
+    gpu: { url: BIREFNET_1024('onnx/model_fp16.onnx'), mb: 115, f16: true, sha256: '4059896039dfccb0f15b9080ff06d11d90e499449bb045e797055eb8901cf5f4' },
+    fallback: 'balanced',
   },
   portrait: {
-    label: 'Portrait', about: 'MODNet, made for people and hair', size: 0,
+    label: 'Portrait', about: 'MODNet: made for people and hair', size: 0,
     mean: [0.5, 0.5, 0.5], std: [0.5, 0.5, 0.5], scale: 1 / 255, minmax: false,
-    gpu: { url: HF + 'Xenova/modnet/resolve/main/onnx/model_fp16.onnx', mb: 13, f16: true },
-    gpuF32: { url: HF + 'Xenova/modnet/resolve/main/onnx/model.onnx', mb: 26 },
-    cpu: { url: HF + 'Xenova/modnet/resolve/main/onnx/model_quantized.onnx', mb: 6.6 },
+    gpu: { url: MODNET('onnx/model_fp16.onnx'), mb: 13, f16: true },
+    gpuF32: { url: MODNET('onnx/model.onnx'), mb: 26 },
+    cpu: { url: MODNET('onnx/model_quantized.onnx'), mb: 6.6 },
   },
 };
 
@@ -62,6 +69,8 @@ const state = {
   model: 'balanced',
   gpu: null,         // null = unknown, false = none, { f16 } = WebGPU
   gpuReady: null,
+  gpuFailed: new Set(), // models whose WebGPU run failed here
+  userModel: false,     // the user picked a model; keep it
   sessions: new Map(),
   actual: false,     // 100% zoom
   cropBox: null,
@@ -143,6 +152,7 @@ function refresh() {
   runLive(true);
   updateInfo();
   updateButtons();
+  renderHistory();
   el.rw.value = state.image.width;
   el.rh.value = state.image.height;
   if (state.cropBox) layoutCrop();
@@ -151,7 +161,7 @@ function refresh() {
 function updateInfo(extra) {
   const img = state.image;
   if (!img) return (el.info.textContent = 'No image');
-  const last = state.history.at(-1)?.label;
+  const last = state.history.at(-1)?.step.label;
   el.info.textContent = `${img.width} × ${img.height}${img.hasAlpha() ? ' · transparent' : ''}${extra ? ` · ${extra}` : last ? ` · ${last}` : ''}`;
 }
 
@@ -166,21 +176,31 @@ function updateButtons() {
     .forEach((b) => (b.disabled = !has));
   $('#undo').disabled = !state.history.length;
   $('#redo').disabled = !state.future.length;
+  const kinds = new Set(state.history.map((h) => h.step.kind));
+  const sections = new Set(state.history.map((h) => h.step.section));
+  for (const b of $$('[data-revert-kind]')) b.disabled = !kinds.has(b.dataset.revertKind);
+  for (const b of $$('[data-revert-section]')) b.disabled = !sections.has(b.dataset.revertSection);
   $('#zoom').textContent = state.actual ? '100%' : 'Fit';
   if (has) renderModels();
 }
 
 // ---- documents and history ------------------------------------------------------
+//
+// Every edit is a step that knows how to redo itself: run(img, changed) returns
+// the edited image (changed = the input differs from when the step was first
+// applied, so cached model output must be recomputed). History entries keep the
+// step and a snapshot of the image just before it, which lets any single step
+// be reverted: rebuild from that snapshot and re-run the steps after it.
 
-function freeList(list) {
-  for (const h of list) h.image.free();
+function freeEntries(list) {
+  for (const e of list) e.image?.free();
   list.length = 0;
 }
 
 function setDocument(img, name) {
   endCutout();
-  freeList(state.history);
-  freeList(state.future);
+  freeEntries(state.history);
+  freeEntries(state.future);
   state.original?.free();
   state.image?.free();
   state.image = img;
@@ -194,72 +214,161 @@ function setDocument(img, name) {
   refresh();
 }
 
-function pushHistory(label) {
-  state.history.push({ image: state.image, label });
-  freeList(state.future);
-  // Keep history within ~600 MB of pixels and 40 steps.
+// Keep the newest snapshots within ~600 MB. Older steps stay in the list and
+// are rebuilt from the original when they are needed.
+function trimSnapshots() {
   let bytes = 0;
   for (let i = state.history.length - 1; i >= 0; i--) {
     const h = state.history[i];
+    if (!h.image) continue;
     bytes += h.image.width * h.image.height * 4;
-    if (bytes > 600e6 || state.history.length - i > 40) {
-      for (const old of state.history.splice(0, i + 1)) old.image.free();
-      break;
+    if (bytes > 600e6) {
+      h.image.free();
+      h.image = null;
     }
   }
 }
 
-// Apply fn to a copy of the full image and make that the new state.
-async function commit(label, fn) {
+function record(step, before) {
+  state.history.push({ step, image: before });
+  freeEntries(state.future);
+  trimSnapshots();
+}
+
+// Run a step on img (consumed); returns the result.
+async function runStep(step, img, changed) {
+  let out;
+  try {
+    out = await step.run(img, changed);
+  } catch (e) {
+    img.free();
+    throw e;
+  }
+  if (out !== img) img.free();
+  return out;
+}
+
+const inPlace = (label, kind, section, fn) => ({ label, kind, section, run: (img) => (fn(img), img) });
+
+// Apply a step to the current image and record it.
+async function applyStep(step) {
   if (!state.image) return;
-  const run = () => {
-    const next = state.image.clone();
-    try {
-      fn(next);
-    } catch (e) {
-      next.free();
-      throw e;
-    }
+  const run = async () => {
+    const next = await runStep(step, state.image.clone(), false);
     endCutout();
-    pushHistory(label);
+    record(step, state.image);
     state.image = next;
     refresh();
   };
-  if (state.image.width * state.image.height > 3e6) await busy(`${label}…`, run);
+  if (state.image.width * state.image.height > 3e6) await busy(`${step.label}…`, run);
   else {
     try {
-      run();
+      await run();
     } catch (e) {
       toast(e.message, true);
     }
   }
 }
 
-function undo() {
+const commit = (label, fn, kind = null, section = null) => applyStep(inPlace(label, kind, section, fn));
+
+// The image as it was just before history[index] (a new image the caller owns).
+async function imageBefore(index) {
+  let j = index;
+  while (j >= 0 && !state.history[j].image) j--;
+  let img = j >= 0 ? state.history[j].image.clone() : state.original.clone();
+  for (let i = Math.max(j, 0); i < index; i++) img = await runStep(state.history[i].step, img, false);
+  return img;
+}
+
+// Take one step out of the history; the steps after it are re-applied.
+async function revert(index) {
+  const target = state.history[index];
+  if (!target) return;
+  endCutout();
+  cancelCrop();
+  await busy(`Reverting “${target.step.label}”…`, async () => {
+    let img = await imageBefore(index);
+    const rebuilt = [];
+    try {
+      for (const h of state.history.slice(index + 1)) {
+        const before = img.clone();
+        img = await runStep(h.step, img, true);
+        rebuilt.push({ step: h.step, image: before });
+      }
+    } catch (e) {
+      img.free();
+      freeEntries(rebuilt);
+      throw e;
+    }
+    for (const h of state.history.slice(index)) h.image?.free();
+    state.history.splice(index, state.history.length - index, ...rebuilt);
+    freeEntries(state.future);
+    state.image.free();
+    state.image = img;
+    trimSnapshots();
+    refresh();
+    updateInfo(`reverted ${target.step.label.toLowerCase()}`);
+  });
+}
+
+// Revert the most recent step matching a kind (e.g. "rotl") or a section.
+function revertLatest(match) {
+  for (let i = state.history.length - 1; i >= 0; i--) if (match(state.history[i].step)) return revert(i);
+}
+
+async function undo() {
   if (!state.history.length) return;
   endCutout();
-  const h = state.history.pop();
-  state.future.push({ image: state.image, label: h.label });
-  state.image = h.image;
-  refresh();
+  const i = state.history.length - 1, h = state.history[i];
+  try {
+    const before = h.image ?? (await imageBefore(i));
+    state.history.pop();
+    state.future.push({ step: h.step, image: state.image });
+    state.image = before;
+    refresh();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function redo() {
   if (!state.future.length) return;
   endCutout();
   const f = state.future.pop();
-  state.history.push({ image: state.image, label: f.label });
+  state.history.push({ step: f.step, image: state.image });
   state.image = f.image;
+  trimSnapshots();
   refresh();
 }
 
 function resetToOriginal() {
   if (!state.original) return;
-  endCutout();
-  pushHistory('Reset');
-  state.image = state.original.clone();
   resetSliders();
-  refresh();
+  applyStep({ label: 'Reset to original', kind: 'reset', section: null, run: () => state.original.clone() });
+}
+
+function renderHistory() {
+  const ol = $('#history');
+  ol.textContent = '';
+  const add = (text, index) => {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    span.textContent = text;
+    li.append(span);
+    if (index >= 0) {
+      const b = document.createElement('button');
+      b.className = 'btn rev';
+      b.textContent = '↶';
+      b.title = 'Revert this step (later steps are re-applied)';
+      b.addEventListener('click', () => revert(index));
+      li.append(b);
+    }
+    ol.append(li);
+  };
+  add('Original', -1);
+  state.history.forEach((h, i) => add(h.step.label, i));
+  $('#history-hint').hidden = !state.history.length;
 }
 
 // ---- opening images --------------------------------------------------------------
@@ -308,7 +417,7 @@ async function openFiles(files) {
 // ---- live previews (sliders) ---------------------------------------------------------
 
 const adjustDefaults = { exposure: 0, brightness: 0, contrast: 0, saturation: 0, hue: 0, temperature: 0, tint: 0, gamma: 1 };
-const liveDefaults = { blur: 0, sharpen: 0, posterize: 0, threshold: 0, rotate: 0 };
+const liveDefaults = { blur: 0, sharpen: 0, posterize: 0, threshold: 0 };
 
 function readAdjust() {
   const a = {};
@@ -322,8 +431,20 @@ function readLive() {
   return v;
 }
 
+const readStraighten = () => +$('#straighten').value;
 const adjustIsDefault = (a) => Object.keys(adjustDefaults).every((k) => a[k] === adjustDefaults[k]);
 const liveIsDefault = (v) => Object.keys(liveDefaults).every((k) => v[k] === liveDefaults[k]);
+const signed = (v) => `${v > 0 ? '+' : ''}${Number.isInteger(v) ? v : v.toFixed(2)}`;
+
+function adjustLabel(a) {
+  const parts = Object.keys(adjustDefaults).filter((k) => a[k] !== adjustDefaults[k]).map((k) => `${k} ${k === 'gamma' ? a[k] : signed(a[k])}`);
+  return `Adjust: ${parts.join(', ')}`;
+}
+
+function filterLabel(v) {
+  const parts = Object.keys(liveDefaults).filter((k) => v[k] !== liveDefaults[k] && !(k === 'posterize' && v[k] < 2)).map((k) => `${k} ${v[k]}`);
+  return `Filter: ${parts.join(', ')}`;
+}
 
 function applyAdjust(img, a) {
   if (!adjustIsDefault(a)) img.adjust(a);
@@ -335,7 +456,6 @@ function applyLive(img, v, s = 1) {
   if (v.sharpen > 0) img.sharpen(v.sharpen, Math.max(0.6, s), 2);
   if (v.posterize >= 2) img.posterize(v.posterize);
   if (v.threshold > 0) img.threshold(v.threshold);
-  if (v.rotate) img.rotate(v.rotate);
 }
 
 let livePending = false;
@@ -353,12 +473,13 @@ function runLive(now = false) {
   }
   state.live?.free();
   state.live = null;
-  const a = readAdjust(), v = readLive();
-  if (!adjustIsDefault(a) || !liveIsDefault(v)) {
+  const a = readAdjust(), v = readLive(), r = readStraighten();
+  if (!adjustIsDefault(a) || !liveIsDefault(v) || r) {
     state.live = state.preview.clone();
     try {
       applyAdjust(state.live, a);
       applyLive(state.live, v, state.preview.width / state.image.width);
+      if (r) state.live.rotate(r);
     } catch (e) {
       toast(e.message, true);
     }
@@ -366,6 +487,7 @@ function runLive(now = false) {
   draw(state.live ?? state.preview);
   $('#adj-apply').disabled = adjustIsDefault(a);
   $('#live-apply').disabled = liveIsDefault(v);
+  $('#straighten-apply').disabled = !r;
 }
 
 function syncOutputs() {
@@ -373,13 +495,14 @@ function syncOutputs() {
     const out = input.parentElement.querySelector('output');
     if (!out) continue;
     const v = +input.value;
-    out.textContent = input.dataset.adj === 'hue' || input.dataset.live === 'rotate' ? `${v}°` : Number.isInteger(v) ? v : v.toFixed(2);
+    out.textContent = input.dataset.adj === 'hue' || input.id === 'straighten' ? `${v}°` : Number.isInteger(v) ? v : v.toFixed(2);
   }
 }
 
 function resetSliders(which) {
   if (!which || which === 'adjust') for (const i of $$('[data-adj]')) i.value = adjustDefaults[i.dataset.adj];
   if (!which || which === 'live') for (const i of $$('[data-live]')) i.value = liveDefaults[i.dataset.live];
+  if (!which || which === 'straighten') $('#straighten').value = 0;
   syncOutputs();
 }
 
@@ -396,26 +519,32 @@ function renderModels() {
       b.setAttribute('role', 'radio');
       b.addEventListener('click', () => {
         state.model = key;
+        state.userModel = true;
         renderModels();
       });
       box.append(b);
     }
   }
+  const known = state.gpu !== null;
   for (const b of box.children) {
-    const m = MODELS[b.dataset.model];
-    b.setAttribute('aria-checked', String(b.dataset.model === state.model));
-    b.disabled = state.gpu === false && !m.cpu;
-    b.title = b.disabled ? 'Needs WebGPU' : m.about;
+    const key = b.dataset.model, m = MODELS[key];
+    b.setAttribute('aria-checked', String(key === state.model));
+    b.disabled = known && !variant(m, key);
+    b.title = b.disabled ? (state.gpu ? 'Not supported by this GPU' : 'Needs WebGPU') : m.about;
   }
-  if (state.gpu === false && !MODELS[state.model].cpu) state.model = 'balanced';
+  if (known && !variant(MODELS[state.model], state.model)) state.model = MODELS[state.model].fallback ?? 'balanced';
   const m = MODELS[state.model];
-  const v = variant(m);
-  $('#model-hint').textContent = v ? `${m.about} · ${v.mb} MB download, cached after the first use · runs on ${state.gpu ? 'the GPU' : 'the CPU'}` : m.about;
+  const v = variant(m, state.model);
+  $('#model-hint').textContent = v ? `${m.about} · ${v.mb} MB download, cached after the first use · runs on ${v.ep === 'webgpu' ? 'the GPU' : 'the CPU'}` : m.about;
 }
 
-function variant(m) {
-  if (state.gpu) return m.gpu.f16 && !state.gpu.f16 ? m.gpuF32 ?? m.cpu : m.gpu;
-  return m.cpu ?? null;
+// The file and backend to use for a model here, or null if it cannot run.
+function variant(m, key) {
+  if (state.gpu && !state.gpuFailed.has(key)) {
+    const v = m.gpu.f16 && !state.gpu.f16 ? m.gpuF32 : m.gpu;
+    if (v) return { ...v, ep: 'webgpu' };
+  }
+  return m.cpu ? { ...m.cpu, ep: 'wasm' } : null;
 }
 
 function detectGpu() {
@@ -426,6 +555,8 @@ function detectGpu() {
     } catch {
       state.gpu = false;
     }
+    // Best quality by default when the GPU can run it.
+    if (!state.userModel) state.model = variant(MODELS.best, 'best') ? 'best' : 'balanced';
     updateEngine();
     renderModels();
   })();
@@ -443,19 +574,24 @@ function loadOrt() {
   return ortPromise;
 }
 
-// Download a model with progress, keeping a copy in the Cache API.
-async function fetchModel(url, mb, label) {
+async function sha256(bytes) {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return [...d].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Download a model with progress, keeping a verified copy in the Cache API.
+async function fetchModel(v, label) {
   let cache = null;
   try {
-    cache = await caches.open('imgedit-models-v1');
-    const hit = await cache.match(url);
+    cache = await caches.open('imgedit-models-v2');
+    const hit = await cache.match(v.url);
     if (hit) return new Uint8Array(await hit.arrayBuffer());
   } catch {
     cache = null;
   }
-  const res = await fetch(url);
+  const res = await fetch(v.url);
   if (!res.ok) throw new Error(`Model download failed (${res.status}).`);
-  const total = +res.headers.get('content-length') || mb * 1e6;
+  const total = +res.headers.get('content-length') || v.mb * 1e6;
   const reader = res.body.getReader();
   const chunks = [];
   let got = 0;
@@ -466,38 +602,33 @@ async function fetchModel(url, mb, label) {
     got += value.length;
     progress(got / total, `Downloading ${label} model… ${(got / 1e6).toFixed(0)} / ${Math.round(total / 1e6)} MB`);
   }
-  const blob = new Blob(chunks);
-  cache?.put(url, new Response(blob, { headers: { 'content-type': 'application/octet-stream' } })).catch(() => {});
-  return new Uint8Array(await blob.arrayBuffer());
+  const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
+  if (v.sha256 && (await sha256(bytes)) !== v.sha256) throw new Error('The downloaded model failed its integrity check.');
+  cache?.put(v.url, new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } })).catch(() => {});
+  return bytes;
+}
+
+function dropSessions() {
+  for (const s of state.sessions.values()) s.session.release?.();
+  state.sessions.clear();
 }
 
 async function getSession(key) {
   await detectGpu();
   const m = MODELS[key];
-  const v = variant(m);
-  if (!v) throw new Error(`${m.label} needs WebGPU, which this browser does not provide. Try Balanced.`);
-  const id = `${key}:${v.url}`;
+  const v = variant(m, key);
+  if (!v) throw new Error(`${m.label} needs WebGPU, which this browser does not provide.`);
+  const id = `${key}:${v.url}:${v.ep}`;
   if (state.sessions.has(id)) return state.sessions.get(id);
-  for (const s of state.sessions.values()) s.session.release?.();
-  state.sessions.clear();
+  dropSessions(); // one model resident at a time
 
   progress(0, 'Loading the model runtime…');
   const ort = await loadOrt();
-  const bytes = await fetchModel(v.url, v.mb, m.label);
+  const bytes = await fetchModel(v, m.label);
   progress(1, 'Preparing the model…');
   await frame();
-  let ep = state.gpu ? 'webgpu' : 'wasm';
-  let session;
-  try {
-    session = await ort.InferenceSession.create(bytes, { executionProviders: [ep], graphOptimizationLevel: 'all' });
-  } catch (e) {
-    if (ep !== 'webgpu' || !m.cpu) throw e;
-    console.warn('WebGPU session failed, using the CPU', e);
-    ep = 'wasm';
-    const cpuBytes = m.cpu.url === v.url ? bytes : await fetchModel(m.cpu.url, m.cpu.mb, m.label);
-    session = await ort.InferenceSession.create(cpuBytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
-  }
-  const entry = { session, ep, ort };
+  const session = await ort.InferenceSession.create(bytes, { executionProviders: [v.ep], graphOptimizationLevel: 'all', logSeverityLevel: 3 });
+  const entry = { session, ep: v.ep, ort };
   state.sessions.set(id, entry);
   return entry;
 }
@@ -528,6 +659,39 @@ async function predict(key, img) {
   return { matte: data, mw, mh, ep, minmax: m.minmax };
 }
 
+// Like predict, but steps down when this browser or GPU cannot run a model:
+// first to the CPU build of the same model, then to its fallback model.
+async function predictSafe(key, img) {
+  for (;;) {
+    const m = MODELS[key];
+    const v = variant(m, key);
+    try {
+      return { ...(await predict(key, img)), key };
+    } catch (e) {
+      console.warn(`${m.label} failed (${v?.ep ?? 'no backend'})`, e);
+      dropSessions();
+      if (v?.ep === 'webgpu') {
+        state.gpuFailed.add(key);
+        renderModels();
+        if (variant(m, key)) {
+          toast(`${m.label} could not run on this GPU, so it is running on the CPU.`);
+          continue;
+        }
+      }
+      if (m.fallback && m.fallback !== key) {
+        toast(`${m.label} is not supported here, so ${MODELS[m.fallback].label} was used.`);
+        key = m.fallback;
+        if (state.model !== key) {
+          state.model = key;
+          renderModels();
+        }
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 function cutoutSettings() {
   return {
     refine: $('#refine').checked,
@@ -539,11 +703,12 @@ function cutoutSettings() {
     mode: $('#bg-mode').value,
     color: parseInt($('#bg-color').value.slice(1), 16),
     blur: +$('#bg-blur').value,
+    maskOnly: !!state.cutout?.maskOnly,
   };
 }
 
-// Builds the cut-out from the session's source image with the current settings.
-function renderCutout(c, s, maskOnly = false) {
+// Builds a cut-out of c.source (not consumed) with settings s.
+function renderCutout(c, s) {
   const img = c.source.clone();
   try {
     if (c.kind === 'model') img.applyMatte(c.matte, c.mw, c.mh, { minmax: c.minmax, radius: s.refine ? 4 : 0 });
@@ -551,7 +716,7 @@ function renderCutout(c, s, maskOnly = false) {
     if (s.grow) img.alphaGrow(s.grow);
     if (s.feather > 0) img.alphaFeather(s.feather);
     if (s.keep) img.invert('alpha');
-    if (maskOnly) img.alphaToGray();
+    if (s.maskOnly) img.alphaToGray();
     else {
       const mode = s.mode === 'image' && !state.bgImage ? 'transparent' : s.mode;
       const scale = Math.max(img.width, img.height) / 1000;
@@ -564,13 +729,37 @@ function renderCutout(c, s, maskOnly = false) {
   }
 }
 
-async function applyCutout(first, maskOnly = false) {
+// History step for a cut-out. Re-tuning updates its settings in place, so a
+// replay uses what is on screen; a model step re-runs the model when the image
+// it starts from has changed.
+function cutoutStep(c, s) {
+  const step = {
+    label: c.kind === 'model' ? `Background removed (${MODELS[c.key].label})` : 'Plain background removed',
+    kind: c.kind === 'model' ? 'remove-bg' : 'key-bg',
+    section: 'background',
+    settings: s,
+    run: async (img, changed) => {
+      let src = { ...c, source: img };
+      if (c.kind === 'model' && changed) src = { ...src, ...(await predictSafe(c.key, img)), source: img };
+      return renderCutout(src, step.settings);
+    },
+  };
+  return step;
+}
+
+async function applyCutout(first) {
   const c = state.cutout;
   if (!c) return;
   const run = () => {
-    const img = renderCutout(c, cutoutSettings(), maskOnly);
-    if (first) pushHistory(c.kind === 'model' ? 'Background removed' : 'Plain background removed');
-    else state.image.free();
+    const s = cutoutSettings();
+    const img = renderCutout(c, s);
+    if (first) {
+      c.step = cutoutStep(c, s);
+      record(c.step, state.image);
+    } else {
+      c.step.settings = s;
+      state.image.free();
+    }
     state.image = img;
     refresh();
   };
@@ -590,6 +779,7 @@ function startCutout(c) {
   $('#cutout-opts').hidden = false;
   $('#tol-row').hidden = c.kind !== 'key';
   $('#refine').parentElement.hidden = c.kind !== 'model';
+  $('#mask-only').textContent = 'Show mask only';
 }
 
 function endCutout() {
@@ -601,19 +791,19 @@ function endCutout() {
 
 async function removeBackground() {
   if (!state.image) return;
-  const key = state.model;
   await busy('Removing background…', async () => {
     const t = performance.now();
     const src = state.image.clone();
+    let r;
     try {
-      const r = await predict(key, src);
-      startCutout({ kind: 'model', source: src, ...r });
+      r = await predictSafe(state.model, src);
     } catch (e) {
       src.free();
       throw e;
     }
+    startCutout({ kind: 'model', source: src, ...r });
     await applyCutout(true);
-    updateInfo(`background removed in ${fmtMs(performance.now() - t)} on ${state.cutout?.ep === 'webgpu' ? 'GPU' : 'CPU'}`);
+    updateInfo(`background removed in ${fmtMs(performance.now() - t)} on the ${r.ep === 'webgpu' ? 'GPU' : 'CPU'}`);
   });
 }
 
@@ -713,7 +903,7 @@ function applyCrop() {
   const sx = state.image.width / r.w, sy = state.image.height / r.h;
   const x = Math.round(b.x * sx), y = Math.round(b.y * sy), w = Math.round(b.w * sx), h = Math.round(b.h * sy);
   cancelCrop();
-  commit('Crop', (img) => img.crop(x, y, Math.max(1, w), Math.max(1, h)));
+  commit(`Crop to ${Math.max(1, w)}×${Math.max(1, h)}`, (img) => img.crop(x, y, Math.max(1, w), Math.max(1, h)), 'crop', 'transform');
 }
 
 // ---- export --------------------------------------------------------------------------
@@ -837,7 +1027,7 @@ async function runBatch(fileList) {
       try {
         img = await decodeFile(f);
         if (remove) {
-          const r = await predict(state.model, img);
+          const r = await predictSafe(state.model, img);
           img.applyMatte(r.matte, r.mw, r.mh, { minmax: r.minmax }).finishCutout({});
         }
         if (trim) img.trim(8);
@@ -961,12 +1151,18 @@ function setupUI() {
       toast(e.message, true);
     }
   });
-  $('#mask-only').addEventListener('click', () => applyCutout(false, true));
+  $('#mask-only').addEventListener('click', () => {
+    if (!state.cutout) return;
+    state.cutout.maskOnly = !state.cutout.maskOnly;
+    $('#mask-only').textContent = state.cutout.maskOnly ? 'Show cut-out' : 'Show mask only';
+    applyCutout(false);
+  });
 
-  // Invert, filters, transforms
+  // Invert, filters, transforms. Each step records a kind so its ↶ button can revert it.
+  const labels = { rgb: 'Invert colours', lightness: 'Invert lightness', alpha: 'Invert transparency' };
   for (const b of $$('[data-invert]')) {
-    const labels = { rgb: 'Invert colours', lightness: 'Invert lightness', alpha: 'Invert transparency' };
-    b.addEventListener('click', () => commit(labels[b.dataset.invert], (img) => img.invert(b.dataset.invert)));
+    const mode = b.dataset.invert;
+    b.addEventListener('click', () => commit(labels[mode], (img) => img.invert(mode), `invert-${mode}`, 'invert'));
   }
   const filters = {
     'auto-levels': ['Auto levels', (img) => img.autoLevels(false)],
@@ -974,30 +1170,46 @@ function setupUI() {
     grayscale: ['Grayscale', (img) => img.grayscale()],
     sepia: ['Sepia', (img) => img.sepia(1)],
   };
-  for (const b of $$('[data-filter]')) b.addEventListener('click', () => commit(...filters[b.dataset.filter]));
+  for (const b of $$('[data-filter]')) {
+    const [label, fn] = filters[b.dataset.filter];
+    b.addEventListener('click', () => commit(label, fn, b.dataset.filter, 'filters'));
+  }
   const transforms = {
     rotl: ['Rotate left', (img) => img.rotate90(3)],
     rotr: ['Rotate right', (img) => img.rotate90(1)],
     fliph: ['Flip horizontal', (img) => img.flip(true)],
     flipv: ['Flip vertical', (img) => img.flip(false)],
-    trim: ['Trim', (img) => img.trim(8)],
+    trim: ['Trim borders', (img) => img.trim(8)],
   };
-  for (const b of $$('[data-tf]')) b.addEventListener('click', () => { cancelCrop(); commit(...transforms[b.dataset.tf]); });
+  for (const b of $$('[data-tf]')) {
+    const [label, fn] = transforms[b.dataset.tf];
+    b.addEventListener('click', () => {
+      cancelCrop();
+      commit(label, fn, b.dataset.tf, 'transform');
+    });
+  }
+  for (const b of $$('[data-revert-kind]')) b.addEventListener('click', () => revertLatest((s) => s.kind === b.dataset.revertKind));
+  for (const b of $$('[data-revert-section]')) b.addEventListener('click', () => revertLatest((s) => s.section === b.dataset.revertSection));
 
   // Sliders
-  for (const input of $$('[data-adj],[data-live]')) input.addEventListener('input', () => { syncOutputs(); runLive(); });
+  for (const input of $$('[data-adj],[data-live],#straighten')) input.addEventListener('input', () => { syncOutputs(); runLive(); });
   $('#adj-apply').addEventListener('click', () => {
     const a = readAdjust();
     resetSliders('adjust');
-    commit('Adjust', (img) => applyAdjust(img, a));
+    commit(adjustLabel(a), (img) => applyAdjust(img, a), 'adjust', 'adjust');
   });
   $('#adj-reset').addEventListener('click', () => { resetSliders('adjust'); runLive(); });
   $('#live-apply').addEventListener('click', () => {
     const v = readLive();
     resetSliders('live');
-    commit('Filter', (img) => applyLive(img, v, 1));
+    commit(filterLabel(v), (img) => applyLive(img, v, 1), 'filter', 'filters');
   });
   $('#live-reset').addEventListener('click', () => { resetSliders('live'); runLive(); });
+  $('#straighten-apply').addEventListener('click', () => {
+    const r = readStraighten();
+    resetSliders('straighten');
+    commit(`Straighten ${signed(r)}°`, (img) => img.rotate(r), 'straighten', 'transform');
+  });
 
   // Crop and resize
   setupCropDrag();
@@ -1016,7 +1228,7 @@ function setupUI() {
   $('#resize').addEventListener('click', () => {
     const w = Math.round(+el.rw.value), h = Math.round(+el.rh.value);
     if (!(w > 0 && h > 0 && w <= 30000 && h <= 30000)) return toast('Enter a size between 1 and 30000 pixels.', true);
-    commit(`Resize to ${w}×${h}`, (img) => img.resize(w, h));
+    commit(`Resize to ${w}×${h}`, (img) => img.resize(w, h), 'resize', 'transform');
   });
 
   // Export

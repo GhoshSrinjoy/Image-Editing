@@ -50,6 +50,14 @@
     </section>
 
     <aside class="panel" aria-label="Tools">
+      <details open data-section="history">
+        <summary>History</summary>
+        <div class="group">
+          <ol id="history" class="history"></ol>
+          <p class="hint" id="history-hint" hidden>↶ reverts that one step; the steps after it are re-applied.</p>
+        </div>
+      </details>
+
       <details open data-section="background">
         <summary>Background</summary>
         <div class="group">
@@ -57,6 +65,7 @@
           <p class="hint" id="model-hint"></p>
           <button id="remove-bg" class="btn primary wide" disabled>Remove background</button>
           <button id="key-bg" class="btn wide" disabled title="No download: removes a plain, evenly coloured background">Remove plain background</button>
+          <button class="btn wide" data-revert-section="background" disabled title="Undo the last background removal, keep later edits">↶ Revert background removal</button>
         </div>
         <div class="group" id="cutout-opts" hidden>
           <label class="row" id="tol-row" hidden><span>Tolerance</span><input id="tolerance" type="range" min="1" max="60" value="12"><output for="tolerance"></output></label>
@@ -82,10 +91,10 @@
 
       <details data-section="invert">
         <summary>Invert</summary>
-        <div class="group buttons">
-          <button class="btn" data-invert="rgb" disabled>Colours</button>
-          <button class="btn" data-invert="lightness" disabled title="Light becomes dark, hues stay">Lightness</button>
-          <button class="btn" data-invert="alpha" disabled title="Swap transparent and opaque">Transparency</button>
+        <div class="group tools">
+          <div class="split"><button class="btn" data-invert="rgb" disabled>Colours</button><button class="btn rev" data-revert-kind="invert-rgb" disabled title="Revert the last colour invert">↶</button></div>
+          <div class="split"><button class="btn" data-invert="lightness" disabled title="Light becomes dark, hues stay">Lightness</button><button class="btn rev" data-revert-kind="invert-lightness" disabled title="Revert the last lightness invert">↶</button></div>
+          <div class="split"><button class="btn" data-invert="alpha" disabled title="Swap transparent and opaque">Transparency</button><button class="btn rev" data-revert-kind="invert-alpha" disabled title="Revert the last transparency invert">↶</button></div>
         </div>
       </details>
 
@@ -100,38 +109,44 @@
           <label class="row"><span>Temperature</span><input data-adj="temperature" type="range" min="-1" max="1" step="0.01" value="0"><output></output></label>
           <label class="row"><span>Tint</span><input data-adj="tint" type="range" min="-1" max="1" step="0.01" value="0"><output></output></label>
           <label class="row"><span>Gamma</span><input data-adj="gamma" type="range" min="0.2" max="3" step="0.01" value="1"><output></output></label>
-          <div class="buttons"><button id="adj-apply" class="btn primary" disabled>Apply</button><button id="adj-reset" class="btn">Reset</button></div>
+          <div class="buttons">
+            <button id="adj-apply" class="btn primary" disabled>Apply</button><button id="adj-reset" class="btn">Reset</button>
+            <button class="btn rev" data-revert-kind="adjust" disabled title="Revert the last applied adjustment">↶</button>
+          </div>
         </div>
       </details>
 
       <details data-section="filters">
         <summary>Filters</summary>
         <div class="group">
-          <div class="buttons">
-            <button class="btn" data-filter="auto-levels" disabled>Auto levels</button>
-            <button class="btn" data-filter="auto-color" disabled>Auto colour</button>
-            <button class="btn" data-filter="grayscale" disabled>Grayscale</button>
-            <button class="btn" data-filter="sepia" disabled>Sepia</button>
+          <div class="tools">
+            <div class="split"><button class="btn" data-filter="auto-levels" disabled>Auto levels</button><button class="btn rev" data-revert-kind="auto-levels" disabled title="Revert the last auto levels">↶</button></div>
+            <div class="split"><button class="btn" data-filter="auto-color" disabled>Auto colour</button><button class="btn rev" data-revert-kind="auto-color" disabled title="Revert the last auto colour">↶</button></div>
+            <div class="split"><button class="btn" data-filter="grayscale" disabled>Grayscale</button><button class="btn rev" data-revert-kind="grayscale" disabled title="Revert the last grayscale">↶</button></div>
+            <div class="split"><button class="btn" data-filter="sepia" disabled>Sepia</button><button class="btn rev" data-revert-kind="sepia" disabled title="Revert the last sepia">↶</button></div>
           </div>
           <label class="row"><span>Blur</span><input data-live="blur" type="range" min="0" max="30" step="0.5" value="0"><output></output></label>
           <label class="row"><span>Sharpen</span><input data-live="sharpen" type="range" min="0" max="3" step="0.05" value="0"><output></output></label>
           <label class="row"><span>Posterize</span><input data-live="posterize" type="range" min="0" max="16" step="1" value="0"><output></output></label>
           <label class="row"><span>Threshold</span><input data-live="threshold" type="range" min="0" max="255" step="1" value="0"><output></output></label>
-          <div class="buttons"><button id="live-apply" class="btn primary" disabled>Apply</button><button id="live-reset" class="btn">Reset</button></div>
+          <div class="buttons">
+            <button id="live-apply" class="btn primary" disabled>Apply</button><button id="live-reset" class="btn">Reset</button>
+            <button class="btn rev" data-revert-kind="filter" disabled title="Revert the last applied filter">↶</button>
+          </div>
         </div>
       </details>
 
       <details data-section="transform">
         <summary>Transform</summary>
         <div class="group">
-          <div class="buttons">
-            <button class="btn" data-tf="rotl" disabled title="Rotate left">⟲ 90°</button>
-            <button class="btn" data-tf="rotr" disabled title="Rotate right">⟳ 90°</button>
-            <button class="btn" data-tf="fliph" disabled>Flip ↔</button>
-            <button class="btn" data-tf="flipv" disabled>Flip ↕</button>
+          <div class="tools">
+            <div class="split"><button class="btn" data-tf="rotl" disabled title="Rotate left">⟲ 90°</button><button class="btn rev" data-revert-kind="rotl" disabled title="Revert the last rotate left">↶</button></div>
+            <div class="split"><button class="btn" data-tf="rotr" disabled title="Rotate right">⟳ 90°</button><button class="btn rev" data-revert-kind="rotr" disabled title="Revert the last rotate right">↶</button></div>
+            <div class="split"><button class="btn" data-tf="fliph" disabled>Flip ↔</button><button class="btn rev" data-revert-kind="fliph" disabled title="Revert the last horizontal flip">↶</button></div>
+            <div class="split"><button class="btn" data-tf="flipv" disabled>Flip ↕</button><button class="btn rev" data-revert-kind="flipv" disabled title="Revert the last vertical flip">↶</button></div>
+            <div class="split"><button id="crop-start" class="btn" disabled>Crop…</button><button class="btn rev" data-revert-kind="crop" disabled title="Revert the last crop">↶</button></div>
+            <div class="split"><button class="btn" data-tf="trim" disabled title="Cut away transparent or flat borders">Trim borders</button><button class="btn rev" data-revert-kind="trim" disabled title="Revert the last trim">↶</button></div>
           </div>
-          <label class="row"><span>Straighten</span><input data-live="rotate" type="range" min="-45" max="45" step="0.1" value="0"><output></output></label>
-          <div class="buttons"><button id="crop-start" class="btn" disabled>Crop…</button><button class="btn" data-tf="trim" disabled title="Cut away transparent or flat borders">Trim borders</button></div>
           <div id="crop-bar" class="crop-bar" hidden>
             <select id="crop-ratio">
               <option value="0">Free</option><option value="1">1:1</option><option value="1.3333">4:3</option>
@@ -139,11 +154,13 @@
             </select>
             <button id="crop-apply" class="btn primary">Apply crop</button><button id="crop-cancel" class="btn">Cancel</button>
           </div>
+          <label class="row"><span>Straighten</span><input id="straighten" type="range" min="-45" max="45" step="0.1" value="0"><output></output></label>
+          <div class="split"><button id="straighten-apply" class="btn" disabled>Apply straighten</button><button class="btn rev" data-revert-kind="straighten" disabled title="Revert the last straighten">↶</button></div>
           <div class="resize">
             <input id="rw" type="number" min="1" aria-label="Width"><span>×</span><input id="rh" type="number" min="1" aria-label="Height">
-            <label class="check" title="Keep aspect ratio"><input id="rlock" type="checkbox" checked>🔗</label>
-            <button id="resize" class="btn" disabled>Resize</button>
+            <label class="check" title="Keep aspect ratio"><input id="rlock" type="checkbox" checked> Keep ratio</label>
           </div>
+          <div class="split"><button id="resize" class="btn" disabled>Resize</button><button class="btn rev" data-revert-kind="resize" disabled title="Revert the last resize">↶</button></div>
         </div>
       </details>
 
